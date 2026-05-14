@@ -1,0 +1,115 @@
+name: Register Bundle ID
+
+on:
+  workflow_dispatch:
+
+jobs:
+  register:
+    runs-on: macos-latest
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      BUNDLE_IDENTIFIER: com.tokyonasu.boatracepredictor
+      BUNDLE_NAME: 舟読み
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          test -n "${{ secrets.ASC_API_KEY_CONTENT }}" || (echo "Missing ASC_API_KEY_CONTENT" && exit 1)
+          test -n "$ASC_KEY_ID" || (echo "Missing ASC_KEY_ID" && exit 1)
+          test -n "$ASC_ISSUER_ID" || (echo "Missing ASC_ISSUER_ID" && exit 1)
+
+      - name: Register Bundle ID if needed
+        env:
+          ASC_API_KEY_CONTENT: ${{ secrets.ASC_API_KEY_CONTENT }}
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install PyJWT cryptography requests
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import time
+          import urllib.parse
+
+          import jwt
+          import requests
+
+          key_id = os.environ["ASC_KEY_ID"]
+          issuer_id = os.environ["ASC_ISSUER_ID"]
+          private_key = base64.b64decode(os.environ["ASC_API_KEY_CONTENT"]).decode("utf-8")
+          bundle_identifier = os.environ["BUNDLE_IDENTIFIER"]
+          bundle_name = os.environ["BUNDLE_NAME"]
+
+          token = jwt.encode(
+              {
+                  "iss": issuer_id,
+                  "iat": int(time.time()),
+                  "exp": int(time.time()) + 20 * 60,
+                  "aud": "appstoreconnect-v1",
+              },
+              private_key,
+              algorithm="ES256",
+              headers={"kid": key_id, "typ": "JWT"},
+          )
+
+          session = requests.Session()
+          session.headers.update({
+              "Authorization": f"Bearer {token}",
+              "Content-Type": "application/json",
+          })
+
+          base = "https://api.appstoreconnect.apple.com/v1"
+          query = urllib.parse.urlencode({"filter[identifier]": bundle_identifier})
+          response = session.get(f"{base}/bundleIds?{query}", timeout=30)
+          print("List Bundle IDs:", response.status_code)
+          if response.status_code >= 400:
+              print(response.text)
+              response.raise_for_status()
+
+          data = response.json().get("data", [])
+          if data:
+              bundle = data[0]
+              print("Bundle ID already exists")
+              print("Resource ID:", bundle["id"])
+              print("Identifier:", bundle["attributes"]["identifier"])
+          else:
+              create_body = {
+                  "data": {
+                      "type": "bundleIds",
+                      "attributes": {
+                          "identifier": bundle_identifier,
+                          "name": bundle_name,
+                          "platform": "IOS",
+                      },
+                  }
+              }
+              create = session.post(f"{base}/bundleIds", data=json.dumps(create_body), timeout=30)
+              print("Create Bundle ID:", create.status_code)
+              if create.status_code >= 400:
+                  print(create.text)
+                  create.raise_for_status()
+              bundle = create.json()["data"]
+              print("Bundle ID created")
+              print("Resource ID:", bundle["id"])
+              print("Identifier:", bundle["attributes"]["identifier"])
+
+          apps_query = urllib.parse.urlencode({"filter[bundleId]": bundle_identifier})
+          app_response = session.get(f"{base}/apps?{apps_query}", timeout=30)
+          print("List associated Apps:", app_response.status_code)
+          if app_response.status_code >= 400:
+              print(app_response.text)
+              app_response.raise_for_status()
+
+          apps = app_response.json().get("data", [])
+          if apps:
+              app = apps[0]
+              print("Associated App ID:", app["id"])
+              print("Associated App Name:", app["attributes"].get("name"))
+          else:
+              print("No App Store Connect app is associated with this Bundle ID yet.")
+              print("Create the iOS app once in App Store Connect with this Bundle ID, then run the TestFlight workflow.")
+          PY

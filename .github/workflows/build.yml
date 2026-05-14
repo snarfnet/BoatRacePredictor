@@ -1,0 +1,106 @@
+name: Build and Upload to TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          XCODE_APP=$(ls /Applications/ | grep "^Xcode_" | sort -V | tail -1)
+          sudo xcode-select -s "/Applications/$XCODE_APP"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Check required secrets
+        run: |
+          test -n "${{ secrets.DIST_CERT_BASE64 }}" || (echo "Missing DIST_CERT_BASE64" && exit 1)
+          test -n "${{ secrets.DIST_CERT_PASSWORD }}" || (echo "Missing DIST_CERT_PASSWORD" && exit 1)
+          test -n "${{ secrets.KEYCHAIN_PASSWORD }}" || (echo "Missing KEYCHAIN_PASSWORD" && exit 1)
+          test -n "${{ secrets.ASC_API_KEY_CONTENT }}" || (echo "Missing ASC_API_KEY_CONTENT" && exit 1)
+          test -n "$ASC_KEY_ID" || (echo "Missing ASC_KEY_ID" && exit 1)
+          test -n "$ASC_ISSUER_ID" || (echo "Missing ASC_ISSUER_ID" && exit 1)
+
+      - name: Set build number
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
+          sed -i "" "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUM\"/" project.yml
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Import Distribution Certificate
+        env:
+          CERT_BASE64: ${{ secrets.DIST_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          echo "$CERT_BASE64" | base64 -D > cert.p12
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm cert.p12
+
+      - name: Set up ASC API Key
+        env:
+          ASC_API_KEY_CONTENT: ${{ secrets.ASC_API_KEY_CONTENT }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_API_KEY_CONTENT" | base64 -D > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -project BoatRacePredictor.xcodeproj \
+            -scheme BoatRacePredictor \
+            -destination "generic/platform=iOS" \
+            -archivePath build/BoatRacePredictor.xcarchive \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=83VGKGSQUH \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/BoatRacePredictor.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Upload to TestFlight
+        run: |
+          set -o pipefail
+          IPA_PATH=$(find build/export -name "*.ipa" -print -quit)
+          test -n "$IPA_PATH" || (echo "IPA was not exported" && exit 1)
+          API_PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys" xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee upload.log
+          if grep -q "ERROR:" upload.log; then
+            echo "TestFlight upload reported an error"
+            exit 1
+          fi
