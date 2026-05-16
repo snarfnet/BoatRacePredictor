@@ -16,7 +16,13 @@ jobs:
     - run: |
         pip install requests beautifulsoup4
         cd scripts
+        echo "[1] Fetching real race data..."
+        python3 fetch_boatrace_data.py || echo "Fetch failed, using sample data"
+        echo "[2] Initializing database..."
         python3 init_sample_data.py
+        echo "[3] Fetching race results..."
+        python3 fetch_race_results.py || echo "Result fetch failed"
+        echo "[4] Optimizing prediction weights..."
         python3 optimize_weights.py
     - uses: ncipollo/release-action@v1
       with:
