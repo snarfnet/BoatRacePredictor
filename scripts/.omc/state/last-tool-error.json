@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd \\\"C:/Users/Windows/Documents/New project/ios/BoatRacePredictor/scripts\\\" && python3 init_sample_data.py\",\"description\":\"Initialize sample data in SQLite database\"}",
+  "error": "Exit code 1\n=== Initializing Boatrace Database ===\r\n\r\nTraceback (most recent call last):\r\n  File \"C:\\Users\\Windows\\Documents\\New project\\ios\\BoatRacePredictor\\scripts\\init_sample_data.py\", line 197, in <module>\r\n    init_db()\r\n    ~~~~~~~^^\r\n  File \"C:\\Users\\Windows\\Documents\\New project\\ios\\BoatRacePredictor\\scripts\\init_sample_data.py\", line 135, in init_db\r\n    print(f\"\\u2713 Database initialized at {DB_PATH}\")\r\n    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nUnicodeEncodeError: 'cp932' co...",
+  "timestamp": "2026-05-16T12:21:28.653Z",
+  "retry_count": 1
+}

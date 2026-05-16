@@ -1,0 +1,27 @@
+name: Daily Data Update & Weight Optimization
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - run: |
+        pip install requests beautifulsoup4
+        cd scripts
+        python3 init_sample_data.py
+        python3 optimize_weights.py
+    - uses: ncipollo/release-action@v1
+      with:
+        artifacts: "boatrace.db"
+        name: "DB Latest"
+        tag: "latest-db"
+        allowUpdates: true
+        token: ${{ secrets.GITHUB_TOKEN }}

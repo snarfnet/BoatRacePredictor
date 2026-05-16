@@ -2,18 +2,19 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var resultStore: ResultStore
+    @EnvironmentObject private var dataManager: DataManager
 
     var body: some View {
         TabView {
             NavigationStack {
-                RaceListView(races: SampleData.races)
+                RaceListView(races: dataManager.races.isEmpty ? SampleData.races : dataManager.races)
             }
             .tabItem {
                 Label("予想", systemImage: "flag.checkered")
             }
 
             NavigationStack {
-                StatsView(races: SampleData.races)
+                StatsView(races: dataManager.races.isEmpty ? SampleData.races : dataManager.races)
             }
             .tabItem {
                 Label("成績", systemImage: "chart.bar.xaxis")
@@ -32,11 +33,13 @@ struct ContentView: View {
 
 private struct RaceListView: View {
     let races: [BoatRace]
+    @EnvironmentObject private var resultStore: ResultStore
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                statsPanel
 
                 ForEach(races) { race in
                     NavigationLink {
@@ -59,12 +62,79 @@ private struct RaceListView: View {
             Text("今日のレース")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(BoatTheme.ink)
-            Text("仮データで動くMVPです。展示、モーター、選手成績から買い目候補を出します。")
+            Text("展示、モーター、選手成績から買い目候補を出します。")
                 .font(.subheadline)
                 .foregroundStyle(BoatTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var statsPanel: some View {
+        let stats = resultStore.stats(for: races)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("成績サマリー")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(BoatTheme.ink)
+
+            HStack(spacing: 12) {
+                StatCard(
+                    title: "的中率",
+                    value: String(format: "%.1f%%", stats.hitRate),
+                    icon: "star.fill",
+                    color: .orange
+                )
+
+                StatCard(
+                    title: "回収率",
+                    value: String(format: "%.0f%%", stats.returnRate),
+                    icon: "chart.line.uptrend.xyaxis",
+                    color: stats.returnRate >= 100 ? .green : .red
+                )
+
+                StatCard(
+                    title: "的中数",
+                    value: "\(stats.hits)/\(stats.races)",
+                    icon: "checkmark.circle.fill",
+                    color: .blue
+                )
+            }
+        }
+        .padding(14)
+        .background(BoatTheme.background.opacity(0.5))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(BoatTheme.teal.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+private struct StatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.caption)
+            }
+            .foregroundStyle(color)
+
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(BoatTheme.ink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.white.opacity(0.7))
+        .cornerRadius(8)
     }
 }
 
